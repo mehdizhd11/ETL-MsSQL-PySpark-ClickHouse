@@ -1,3 +1,4 @@
+import clickhouse_connect
 from pyspark.sql import SparkSession, Window
 from pyspark.sql.functions import col, max, year, row_number
 
@@ -66,4 +67,28 @@ window_spec = Window.partitionBy(year("DATE")).orderBy(col("VOLUME").desc())
 df_with_row_num = df.withColumn("ROW_NUM", row_number().over(window_spec))
 top_3_per_year = df_with_row_num.filter(col("ROW_NUM") <= 3)
 final_top = top_3_per_year.withColumn("PC", (col("CLOSE") - col("OPEN")) / col("CLOSE") * 100)
-final_top.select("DATE", "HIGH", "LOW", "VOLUME", "PC", "ROW_NUM").show()
+final_top = final_top.select("DATE", "HIGH", "LOW", "VOLUME", "PC", "ROW_NUM")
+final_top.show()
+
+# Load DataFrame to ClickHouse with pandas DataFrame
+ch_host = "127.0.0.1"
+ch_port = 8123
+ch_database = "default"
+ch_table = "SONY_DF"
+client = clickhouse_connect.get_client(host=ch_host, port=ch_port, database=ch_database)
+
+create_table_query = f"""
+CREATE TABLE IF NOT EXISTS {ch_table} (
+    DATE String,
+    HIGH Float64,
+    LOW Float64,
+    VOLUME Float64,
+    PC Float64,
+    ROW_NUM UInt64
+) ENGINE = MergeTree()
+ORDER BY DATE;
+"""
+client.query(create_table_query)
+
+pandas_df = final_top.toPandas()
+client.insert_df(table=ch_table, df=pandas_df)
